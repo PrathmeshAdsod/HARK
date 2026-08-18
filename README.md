@@ -2,7 +2,7 @@
 
 **Execution memory for Agent Skills.** Hark turns a real agent run—including failures, recovery steps, evidence, and diagnosis—into scoped experience that can make the next related run faster and more reliable. It changes neither the Skill nor the model weights.
 
-[Live application](https://sdzlkokjx52kzobxgsl74riswa0afbzv.lambda-url.us-east-1.on.aws/) · [CockroachDB × AWS Hackathon](https://cockroachdb-ai.devpost.com/) · [Setup, operations, and teardown](SETUP.md)
+[Live application](https://sdzlkokjx52kzobxgsl74riswa0afbzv.lambda-url.us-east-1.on.aws/) · [CockroachDB × AWS Hackathon](https://cockroachdb-ai.devpost.com/) · [Add a workflow](ADD_WORKFLOW.md) · [Setup, operations, and teardown](SETUP.md)
 
 > **Verified production status — 18 August 2026:** the public AWS application, real Gemini inference, CockroachDB Cloud persistence, restricted identities, distributed vector retrieval, failure recovery, provenance, and invalidation are live. A production first run and differently worded related run both succeeded; the related run recalled the first run's experience at cosine similarity `0.757532`, used one fewer tool call, avoided the known permission failure, and completed about 1.92 seconds faster. Amazon Bedrock is integrated as the preferred reasoning route, but this AWS account currently reports `NOT_AUTHORIZED`, so the verified pair used the Gemini fallback. No Bedrock success is claimed.
 
@@ -10,7 +10,7 @@
 
 Agent Skills encode reusable procedure. They do not automatically remember that a particular environment denied a preflight, which safe alternative worked, or which evidence supported the final diagnosis. Chat history is a weak substitute: it is unstructured, difficult to scope, difficult to invalidate, and detached from the execution evidence that produced it.
 
-Hark adds a governed memory plane around one deliberately narrow workflow: diagnosing a CockroachDB orders-query regression with the official [`profiling-statement-fingerprints`](https://github.com/cockroachlabs/cockroachdb-skills/tree/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-observability-and-diagnostics/profiling-statement-fingerprints) Agent Skill.
+Hark adds a governed execution-memory plane around Agent Skills. The live deployment demonstrates that architecture with CockroachDB query-regression diagnosis using the official [`profiling-statement-fingerprints`](https://github.com/cockroachlabs/cockroachdb-skills/tree/e14e86d23ce8ee2e7e40a34ce2944c2502b6eadd/skills/cockroachdb-observability-and-diagnostics/profiling-statement-fingerprints) Skill. The Skill, environment scope, and safe tool surface are workflow-specific; Hark's run evidence, experience model, vector recall, failure memory, provenance, and invalidation semantics carry across workflows. See [Add a workflow](ADD_WORKFLOW.md).
 
 ## First run → related run
 
@@ -55,6 +55,21 @@ Hark uses two named competition technologies:
 
 CockroachDB also stores anonymous demos, immutable run/event evidence, derived experience, run-to-experience links, structured failure recoveries, provider-budget reservations, concurrency leases, and invalidation state. The diagnostic role can read only fixed demo tables and production-safe metadata. A separate memory role owns the memory lifecycle.
 
+## Extending Hark
+
+A Hark workflow binds four things to the same memory plane:
+
+1. a Skill,
+2. a stable Skill/workflow/environment scope,
+3. an explicit safe tool surface,
+4. an adapter that executes those tools against the real environment and returns structured evidence.
+
+The memory loop does not change: Hark searches scoped prior experience, executes the Skill with bounded tools, records evidence and outcomes, persists derived experience in CockroachDB, and links later uses back to their source runs.
+
+That makes workflows additive. A Kubernetes, CI/CD, security, repository-maintenance, or data workflow can define different Skills and tools while retaining the same retrieval, provenance, failure-memory, and invalidation semantics.
+
+For the implementation path—including a short prompt that can be given to Codex or another coding agent—see **[ADD_WORKFLOW.md](ADD_WORKFLOW.md)**.
+
 ## Provider resilience and canonical memory
 
 Reasoning follows a bounded route:
@@ -69,7 +84,7 @@ All memory vectors—queries and documents—come from `gemini-embedding-2` at e
 
 ## Security and cost boundaries
 
-- User text never becomes SQL; the diagnostic surface has exactly four fixed read-only operations.
+- User text never becomes SQL; the current CockroachDB diagnostic surface has exactly four fixed read-only operations.
 - The diagnostic identity cannot write demo or memory data, and the real production check confirmed that boundary.
 - Lambda reads only three named SSM parameters. The Google API key is held in a SecureString, not in code, Lambda environment variables, the browser, or Git.
 - Bedrock IAM is limited to `GetFoundationModelAvailability` and Nova Micro inference.
@@ -116,11 +131,12 @@ Hark therefore skips a known-unavailable Bedrock route during its five-minute he
 ## Repository map
 
 ```text
-backend/     Lambda handler, provider router, agent harness, schema, pinned Skill
-frontend/    Responsive public product UI
-infra/       CloudFormation production stack
-scripts/     Bootstrap, package, deploy, and real-service verification
-tests/       Unit, API, provider-routing, and CockroachDB integration tests
+backend/          Lambda handler, provider router, agent harness, schema, pinned Skill
+frontend/         Responsive public product UI
+infra/            CloudFormation production stack
+scripts/          Bootstrap, package, deploy, and real-service verification
+tests/            Unit, API, provider-routing, and CockroachDB integration tests
+ADD_WORKFLOW.md   How to connect additional Skills, environments, and tool surfaces
 ```
 
 ## License
