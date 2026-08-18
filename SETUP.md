@@ -1,15 +1,76 @@
-# Hark setup, operations, and teardown
+# Hark setup, workflow extension, operations, and teardown
 
-These instructions reproduce the checked-in Python/Lambda architecture. Commands target PowerShell on Windows, AWS `us-east-1`, and CockroachDB v26.2 or later.
+[← README](README.md) · **[Add your workflow](ADD_WORKFLOW.md)** · [Live application](https://sdzlkokjx52kzobxgsl74riswa0afbzv.lambda-url.us-east-1.on.aws/)
+
+Hark has two setup paths:
+
+1. **Run the included production workflow** — reproduce the CockroachDB query-regression implementation end to end.
+2. **Extend Hark with another workflow** — keep the same execution-memory plane while supplying a different Skill, scope, safe tool surface, and real environment adapter.
+
+The repository's included workflow is a complete working template, not a separate memory architecture. Hark's reusable semantics—scoped recall, immutable evidence, experience derivation, failure recovery, source/use provenance, vector retrieval, invalidation, provider routing, and execution budgets—remain the same when another workflow is added.
+
+For the shortest extension path, start with **[ADD_WORKFLOW.md](ADD_WORKFLOW.md)**.
+
+---
+
+## Workflow model
+
+Every Hark workflow connects four workflow-specific pieces to the common memory plane:
+
+```text
+Skill
++ workflow / environment scope
++ safe tools
++ real environment adapter
+              │
+              ▼
+         Hark runtime
+              │
+      execution evidence
+              │
+              ▼
+       CockroachDB memory
+              │
+              ▼
+    later related execution
+```
+
+A workflow should define:
+
+- **Skill** — the procedure the agent follows.
+- **Scope** — stable `skill_id`, `workflow`, and `environment_id` values.
+- **Safe tools** — explicit operations the reasoning model may select.
+- **Environment adapter** — implementation of those operations against the real target system.
+
+Keep the scope distinct for every Skill/environment combination so memory from one context cannot silently influence another.
+
+### Fast extension with a coding agent
+
+A coding agent can inspect Hark's existing workflow and implement another one by following the same contract.
+
+Example:
+
+```text
+Add a Kubernetes incident-diagnosis workflow to this Hark repository.
+Inspect the existing query-regression workflow first. Preserve Hark's memory semantics, provenance, retrieval, invalidation, provider routing, budgets, and security boundaries. Add the Kubernetes Skill, a unique skill/workflow/environment scope, explicit read-only tools for pod status, recent events, deployment inspection and logs, the real Kubernetes environment adapter, task validation, tests, and setup docs. Keep the current workflow working.
+```
+
+The important boundary is simple: **extend the workflow layer; do not replace the Hark memory plane.**
+
+For the manual implementation path, file locations, testing checklist, and more examples, see [ADD_WORKFLOW.md](ADD_WORKFLOW.md).
+
+---
 
 ## Prerequisites
+
+The checked-in production path targets PowerShell on Windows, AWS `us-east-1`, Python 3.12, and CockroachDB v26.2 or later.
 
 - Python 3.12
 - Docker Desktop
 - Git
 - AWS CLI v2 authenticated to the intended account
-- A CockroachDB Cloud account and Basic/free-tier cluster for production
-- A Google Gemini API key with access to the configured models
+- CockroachDB Cloud account and Basic/free-tier cluster for production
+- Google Gemini API key with access to the configured models
 - Optional: [`ccloud`](https://www.cockroachlabs.com/docs/cockroachcloud/ccloud-get-started) for cluster teardown
 
 Confirm local tools and AWS identity:
@@ -21,9 +82,11 @@ aws --version
 aws sts get-caller-identity
 ```
 
-Never paste database passwords, Gemini keys, or AWS credentials into Git, `.env`, browser storage, issue text, screenshots, or chat. `.env` is ignored and `.env.example` contains placeholders only.
+Keep production credentials server-side. `.env` is ignored and `.env.example` contains placeholders only.
 
-## Local setup
+---
+
+## Local setup: included CockroachDB workflow
 
 Create the environment and start the pinned local CockroachDB image:
 
@@ -34,7 +97,7 @@ docker compose up -d
 docker compose ps
 ```
 
-Initialize the schema and roles. Local Docker runs CockroachDB in insecure development mode, so passwords are accepted for parity but are not applied by the server:
+Initialize the schema and roles. Local Docker runs CockroachDB in insecure development mode, so passwords are accepted for parity but are not enforced by the local server:
 
 ```powershell
 $env:HARK_ADMIN_DATABASE_URL = 'postgresql://root@localhost:26257/defaultdb?sslmode=disable'
@@ -43,7 +106,7 @@ $env:HARK_DIAGNOSTIC_PASSWORD = 'local-diagnostic-only'
 .\.venv\Scripts\python.exe .\backend\init_db.py
 ```
 
-Configure local identities and providers. `Read-Host` prevents the Gemini key from appearing in shell history:
+Configure the included workflow and providers:
 
 ```powershell
 $env:AWS_REGION = 'us-east-1'
@@ -58,11 +121,19 @@ $env:EMBEDDING_DIMENSIONS = '256'
 $env:HARK_ENVIRONMENT_ID = 'restricted-orders-gemini-embedding-2-256-v1'
 ```
 
-Start the backend and frontend together, then open `http://127.0.0.1:8080`:
+Start the backend and frontend together:
 
 ```powershell
 .\.venv\Scripts\python.exe .\backend\local_server.py
 ```
+
+Open:
+
+```text
+http://127.0.0.1:8080
+```
+
+---
 
 ## Local tests
 
@@ -73,16 +144,109 @@ $env:HARK_TEST_DATABASE_URL = 'postgresql://root@localhost:26257/defaultdb?sslmo
 .\.venv\Scripts\python.exe -m pytest -q -rs
 ```
 
-The suite covers task validation, kill switch, first/related orchestration, provider routing and fallback, Bedrock health caching, canonical embedding task types/dimensions, provider budgets, diagnosis safety, static/API behavior, real SQL permissions, `42501`, official-Skill queries, vector retrieval, negative retrieval, structured recovery, invalidation, limits, and concurrency leases. Test doubles are dependency-injected in tests only; production has no fake-inference mode.
+The suite covers task validation, kill switch behavior, first/related orchestration, provider routing and fallback, Bedrock health caching, canonical embedding task types/dimensions, provider budgets, diagnosis safety, static/API behavior, real SQL permissions, SQLSTATE `42501`, official-Skill queries, vector retrieval, negative retrieval, structured recovery, invalidation, limits, and concurrency leases.
+
+Test doubles are dependency-injected in tests only. Production has no fake-inference path.
+
+### What to add when you create another workflow
+
+Every additional workflow should add tests for:
+
+- its task validation,
+- its allowed-tool boundary,
+- real or integration-level environment operations,
+- a first run with no useful precedent,
+- experience persistence,
+- a related run that retrieves relevant experience,
+- a case where unrelated memory is rejected,
+- failure/recovery behavior where applicable,
+- provenance and invalidation,
+- isolation from other Skill/workflow/environment scopes.
+
+The second run should still gather fresh evidence. Hark memory is execution guidance, not a cached answer.
+
+---
+
+## Add another workflow manually
+
+The full guide is [ADD_WORKFLOW.md](ADD_WORKFLOW.md). At a high level:
+
+### 1. Add the Skill
+
+Place the Skill under:
+
+```text
+backend/skills/<your-skill>/SKILL.md
+```
+
+Pin or version external Skills so every run remains traceable to the procedure that produced it.
+
+### 2. Define the workflow scope
+
+Give the workflow distinct values for:
+
+```text
+skill_id
+workflow
+environment_id
+```
+
+These values participate in memory isolation before vector ranking.
+
+### 3. Add the safe tool surface
+
+Follow the bounded-tool pattern in:
+
+```text
+backend/hark/service.py
+backend/hark/store.py
+```
+
+Expose only the operations the workflow needs. Tool output should be structured evidence. Avoid turning user text directly into privileged shell commands, SQL, cloud actions, or other unrestricted execution.
+
+### 4. Connect the real environment
+
+Implement the operations against the target system: Kubernetes, GitHub, CI/CD, another database, cloud APIs, security tooling, or another service.
+
+Use server-side credentials and least privilege.
+
+### 5. Reuse the Hark memory loop
+
+Preserve:
+
+```text
+task
+ -> scoped experience search
+ -> Skill + Experience Brief
+ -> bounded execution
+ -> evidence / failure / recovery / outcome
+ -> experience embedding
+ -> CockroachDB persistence
+ -> later retrieval
+ -> explicit source/use provenance
+```
+
+### 6. Verify workflow isolation
+
+A new workflow must not retrieve experience from another Skill or environment unless you explicitly design a compatible shared scope.
+
+---
 
 ## CockroachDB production bootstrap
 
-1. In CockroachDB Cloud, create a Basic/free-tier cluster named `hark-prod` on AWS in `us-east-1`.
-2. Configure a spending or resource limit in the Cloud console if the selected plan exposes one. Check the current CockroachDB pricing page rather than relying on a historical amount.
-3. Create an initial SQL user with administrative setup privileges and copy its generated password once.
-4. Record the General connection-string hostname, but do not save the admin password in the repository.
+The commands below reproduce the included CockroachDB workflow.
 
-The bootstrap creates `hark_memory` and `hark_diagnostic` with random passwords, applies `backend/schema.sql`, grants minimum permissions, and stores only the resulting URLs in SSM SecureString.
+1. In CockroachDB Cloud, create a Basic/free-tier cluster named `hark-prod` on AWS in `us-east-1`.
+2. Configure a spending/resource limit in the Cloud console if the selected plan exposes one.
+3. Create an initial SQL user with administrative setup privileges and copy its generated password once.
+4. Record the General connection-string hostname. Do not commit the admin password.
+
+The bootstrap creates two runtime identities:
+
+- `hark_memory` — owns Hark's memory lifecycle.
+- `hark_diagnostic` — read-only evidence identity for the included workflow.
+
+It applies `backend/schema.sql`, grants minimum permissions, and stores only the resulting URLs in SSM SecureString.
 
 Stage the one-time admin password in the OS temporary directory without echoing it:
 
@@ -105,16 +269,17 @@ try {
   -Region 'us-east-1'
 ```
 
-The script validates the temporary-file location and deletes the file after reading it. The runtime roles are separate:
+The included diagnostic identity has `USAGE` on `hark_demo` and `SELECT` only on the fixed `orders` and `customers` tables. It has no public-schema creation privilege and no cluster privileges.
 
-- `hark_memory`: CRUD on Hark tables; no public-schema creation.
-- `hark_diagnostic`: `USAGE` on `hark_demo` and `SELECT` only on fixed `orders` and `customers` tables; no public-schema creation and no cluster privileges.
+That real permission boundary is why the Skill's cluster-setting preflight can return SQLSTATE `42501`, while the production-safe statistics view, `EXPLAIN`, and index metadata remain available.
 
-The cluster-setting preflight consequently fails with SQLSTATE `42501`, while the production-safe statistics view, `EXPLAIN`, and `information_schema.statistics` remain usable.
+For another workflow, keep `hark_memory` as the common memory identity if appropriate, and create/configure a separate least-privilege environment identity for that workflow's real tools.
 
-## Store the provider secret
+---
 
-Production loads the Gemini key from `/hark/prod/providers`. The following prompt stores it without echoing it or writing it to disk:
+## Store provider credentials
+
+Production loads the Gemini key from `/hark/prod/providers`.
 
 ```powershell
 @'
@@ -136,7 +301,7 @@ print("Stored /hark/prod/providers as SecureString")
 '@ | .\.venv\Scripts\python.exe -
 ```
 
-Verify metadata only—never request or print the decrypted value:
+Verify metadata only:
 
 ```powershell
 aws ssm get-parameter `
@@ -146,20 +311,36 @@ aws ssm get-parameter `
   --output table
 ```
 
+---
+
 ## Provider behavior
 
-Reasoning order is Bedrock Nova Micro → Gemini 3.5 Flash-Lite → Gemini 3.1 Flash-Lite. Bedrock is attempted only when the account-level availability response is authorized and that health result is cached for 300 seconds. The tertiary Gemini route is used only after a recognized provider failure; invalid application requests surface as errors.
+Reasoning is provider-resilient:
 
-Gemini Embedding 2 is the only memory embedding route. Query and document embeddings use their distinct retrieval task types, request exactly 256 values, and are rejected if the provider returns another shape.
+1. **Amazon Bedrock Nova Micro** is the preferred primary route whenever the account-level availability check reports it authorized.
+2. **Gemini 3.5 Flash-Lite** is the automatic fallback when the preferred route is unavailable.
+3. **Gemini 3.1 Flash-Lite** is the tertiary fallback for recognized provider failures.
 
-Check Bedrock without assuming access:
+Bedrock availability is health-gated and cached for 300 seconds, so a known-unavailable route does not add a failed inference call to every run. If authorization becomes available later, the router returns to Bedrock automatically.
+
+Invalid application requests are not disguised as provider failures.
+
+### Canonical memory embeddings
+
+Gemini Embedding 2 is the single canonical memory embedding route. Query and document embeddings use their respective retrieval task types, request exactly 256 values, and are rejected if the provider returns another shape.
+
+This is deliberate: reasoning providers may change between runs, but semantic memory must remain in one comparable vector space.
+
+Verify Bedrock independently:
 
 ```powershell
 $env:AWS_REGION = 'us-east-1'
 .\.venv\Scripts\python.exe .\scripts\verify_bedrock.py
 ```
 
-The command exits non-zero unless account authorization and a real Nova conversation both succeed. Gemini model IDs and embedding dimensionality should be checked against Google's current model documentation before changing configuration.
+The command exits non-zero unless account authorization and a real Nova conversation succeed.
+
+---
 
 ## AWS deployment
 
@@ -173,9 +354,9 @@ aws cloudformation validate-template `
 .\scripts\deploy.ps1 -Region 'us-east-1' -StackName 'hark-prod'
 ```
 
-The deployment script packages the backend, frontend, Skill, and dependencies; creates or reuses a private project artifact bucket with public access blocked; uploads a timestamped package; deploys CloudFormation with `CAPABILITY_NAMED_IAM`; and prints the public Function URL.
+The deployment script packages the backend, frontend, included Skill, and dependencies; creates/reuses a private project artifact bucket with public access blocked; uploads a timestamped package; deploys CloudFormation with `CAPABILITY_NAMED_IAM`; and prints the public Function URL.
 
-The stack creates `hark-prod`, `hark-prod-lambda-role`, its Function URL and policies, and outputs. The three SSM parameters and S3 artifact bucket are bootstrapped outside the stack and therefore appear explicitly in teardown.
+The stack creates the Lambda runtime, runtime role, Function URL/policies, and outputs. SSM parameters and the S3 artifact bucket are bootstrapped outside the stack and therefore appear explicitly in teardown.
 
 Ordinary update:
 
@@ -192,6 +373,10 @@ $env:PYTHONPATH = (Resolve-Path .\dist\lambda).Path
 .\scripts\deploy.ps1 -SkipPackage
 ```
 
+If you add another workflow, make sure its Skill files and runtime dependencies are included by the packaging path before deployment.
+
+---
+
 ## Production verification
 
 Verify the real database and memory lifecycle without printing secrets:
@@ -202,21 +387,38 @@ $env:HARK_DATABASE_PARAMETER = '/hark/prod/database'
 .\.venv\Scripts\python.exe .\scripts\verify_production.py
 ```
 
-The verifier uses an isolated anonymous demo, checks both identities and denied writes, executes all four diagnostic operations, inserts and searches a 256-dimensional verification vector through the production vector index, verifies deterministic recovery, invalidates the experience, and confirms that both retrieval paths exclude it.
+The included verifier checks both identities and denied writes, executes all four CockroachDB diagnostic operations, inserts/searches a 256-dimensional verification vector through the production vector index, verifies deterministic recovery, invalidates the experience, and confirms that both retrieval paths exclude it.
 
-Then run the Bedrock verifier separately. A Bedrock failure does not invalidate the bounded Gemini fallback, but it must be reported truthfully:
+Run the Bedrock verifier separately:
 
 ```powershell
 .\.venv\Scripts\python.exe .\scripts\verify_bedrock.py
 ```
 
-Finally, use Chrome to verify the landing page, a fresh investigation, first and related tasks, comparison metrics, memory provenance/invalidation, refresh, direct demo URL, mobile layout, and console output. Do not treat deployment success as browser verification.
+A Bedrock authorization failure does not invalidate the provider-resilient runtime; it means the router will use its configured fallback until Bedrock becomes authorized.
+
+Finally verify the live application in a real browser:
+
+- landing page,
+- fresh investigation,
+- first run,
+- related run,
+- comparison metrics,
+- experience provenance,
+- invalidation,
+- refresh/direct investigation URL,
+- responsive layout,
+- browser console.
+
+For any new workflow, add an equivalent production verification path that proves the real environment tools and first→related memory behavior.
+
+---
 
 ## Limits and kill switch
 
-Server-side production defaults:
+Current production defaults:
 
-- 4 runs per demo per rolling 24 hours
+- 4 runs per investigation per rolling 24 hours
 - 40 runs per UTC day
 - 1,000 lifetime runs
 - 3 active database leases
@@ -227,9 +429,9 @@ Server-side production defaults:
 - Gemini 3.1 reasoning: 100 requests/day, 12/minute
 - Gemini Embedding 2: 150 requests/day, 90/minute
 
-Daily and per-minute provider reservations are enforced atomically in CockroachDB and are hidden from the public trace.
+Daily and per-minute provider reservations are enforced atomically in CockroachDB and are hidden from the public execution trace.
 
-Disable all new execution while keeping existing demos readable:
+Disable all new execution while keeping existing investigations readable:
 
 ```powershell
 aws ssm put-parameter `
@@ -240,7 +442,7 @@ aws ssm put-parameter `
   --region us-east-1
 ```
 
-Re-enable only after checking the reason for the pause:
+Re-enable after checking the reason for the pause:
 
 ```powershell
 aws ssm put-parameter `
@@ -253,21 +455,31 @@ aws ssm put-parameter `
 
 If the kill-switch read fails, Hark fails closed and blocks new runs.
 
+---
+
 ## Troubleshooting
 
 ### Bedrock `Operation not allowed`
 
-Inspect current account-level availability and run the verifier. In the deployment account on 18 August 2026, agreement, entitlement, and region were `AVAILABLE`, while `authorizationStatus` was `NOT_AUTHORIZED`; the runtime returned `ValidationException: Operation not allowed`.
+First inspect account-level availability and run the real verifier.
 
-If that remains true, open an AWS Support account/access case with:
+In the hackathon deployment account on 18 August 2026, agreement, entitlement, and region were available while Bedrock authorization was not. Hark therefore used its verified Gemini fallback for the acceptance run. Bedrock remains the preferred primary route and will be selected automatically when the account-level availability check reports authorization.
 
-> Account `<ACCOUNT_ID>`, region `us-east-1`: Bedrock availability for `amazon.nova-micro-v1:0` reports `authorizationStatus: NOT_AUTHORIZED`, and Converse/InvokeModel returns `ValidationException: Operation not allowed`. Agreement, entitlement, region, and the documented IAM permissions have been checked. Please review and remove the account-level Bedrock authorization restriction.
+If the restriction persists, open an AWS Support account/access case with the current account, region, model ID, availability response, and the `ValidationException: Operation not allowed` runtime result.
 
-Do not keep retrying the same call. Hark's known-unavailable health cache will use the configured Gemini route. After AWS confirms a change, rerun the verifier and a fresh production investigation; record Bedrock as successful only if the real response passes.
+Do not keep retrying the same blocked call. After AWS confirms an authorization change, rerun:
+
+```powershell
+.\.venv\Scripts\python.exe .\scripts\verify_bedrock.py
+```
+
+Record Bedrock as successful only when the real verifier passes.
 
 ### Public URL returns 403
 
-Lambda Function URLs require both public resource-policy actions in this stack: `lambda:InvokeFunctionUrl` with auth type `NONE`, and `lambda:InvokeFunction` with `InvokedViaFunctionUrl: true`. Confirm both resources remain in `infra/template.yaml`, then redeploy.
+Lambda Function URLs require both public resource-policy actions in this stack: `lambda:InvokeFunctionUrl` with auth type `NONE`, and `lambda:InvokeFunction` with `InvokedViaFunctionUrl: true`.
+
+Confirm both resources remain in `infra/template.yaml`, then redeploy.
 
 ### Database connection fails
 
@@ -293,7 +505,9 @@ aws cloudformation describe-stack-events `
   --output table
 ```
 
-The current AWS account has a regional concurrency limit of 10 and requires all 10 to remain unreserved, so the template uses the CockroachDB lease limit instead of Lambda reserved concurrency.
+The current AWS account has a regional concurrency limit of 10 and requires all 10 to remain unreserved, so Hark uses its CockroachDB execution-lease limit instead of Lambda reserved concurrency.
+
+---
 
 ## Teardown
 
@@ -322,7 +536,7 @@ aws s3 rm "s3://$artifactBucket" --recursive --region us-east-1
 aws s3api delete-bucket --bucket $artifactBucket --region us-east-1
 ```
 
-Deleting `/hark/prod/providers` removes Hark's encrypted copy only. It does not revoke the underlying Google API key; revoke that key separately in the Google project only if it is dedicated to Hark and no other application uses it.
+Deleting `/hark/prod/providers` removes Hark's encrypted copy only. It does **not** revoke the underlying Google API key. Revoke that key separately only if it is dedicated to Hark and no other application uses it.
 
 Delete the CockroachDB cluster with the official CLI:
 
