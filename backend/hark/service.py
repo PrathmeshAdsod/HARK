@@ -7,12 +7,14 @@ import time
 from pathlib import Path
 from typing import Any
 
-from .bedrock import BedrockGateway, InferenceUnavailable, tool_spec
+from .bedrock import InferenceUnavailable, tool_spec
 from .config import Settings
+from .providers import ProviderRouter
 from .store import (
     CapacityError,
     RetrievedExperience,
     Store,
+    experience_brief,
     failure_fingerprint,
 )
 
@@ -35,15 +37,13 @@ class RunService:
         self,
         settings: Settings,
         store: Store | None = None,
-        gateway: BedrockGateway | None = None,
+        gateway: Any | None = None,
     ):
         self.settings = settings
         self.store = store or Store(settings)
-        self.gateway = gateway or BedrockGateway(
-            settings.aws_region,
-            settings.bedrock_model_id,
-            settings.embedding_model_id,
-            settings.embedding_dimensions,
+        self.gateway = gateway or ProviderRouter(
+            settings,
+            self.store.try_consume_provider_request,
         )
 
     def create_demo(self) -> str:
@@ -79,11 +79,13 @@ class RunService:
         input_tokens = 0
         output_tokens = 0
         embedding_tokens = 0
+        reasoning_route: list[dict[str, str]] = []
         actions: list[str] = []
         evidence: dict[str, Any] = {}
         failure: dict[str, Any] | None = None
         memory: RetrievedExperience | None = None
-        embedding: list[float] | None = None
+        query_embedding: list[float] | None = None
+        document_embedding: list[float] | None = None
 
         try:
             self.store.add_event(run_id, "accepted", "Task accepted", task)
@@ -104,9 +106,21 @@ class RunService:
                 "Structured scope: demo, skill, environment, workflow, active successful memories.",
             )
             try:
-                embedding, embedding_tokens = self.gateway.embed(task)
+                query_embedding, query_tokens = self.gateway.embed_query(run_id, task)
+                embedding_tokens += query_tokens
+                self.store.add_event(
+                    run_id,
+                    "query_embedding_generated",
+                    "Canonical query embedding generated",
+                    f"Generated {self.settings.embedding_dimensions}-dimensional retrieval evidence for compatible execution memory.",
+                    {
+                        "embedding_provider": "google-gemini",
+                        "embedding_model": self.settings.embedding_model_id,
+                        "embedding_dimensions": self.settings.embedding_dimensions,
+                    },
+                )
                 memory = self.store.retrieve_experience(
-                    demo_id, embedding, self.settings.similarity_threshold
+                    demo_id, query_embedding, self.settings.similarity_threshold
                 )
             except InferenceUnavailable as exc:
                 self.store.add_event(
@@ -136,20 +150,6 @@ class RunService:
                 )
 
             system_text = _system_prompt(skill_guidance, memory)
-            messages: list[dict[str, Any]] = [
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "text": (
-                                f"Diagnose this supported task: {task}\n"
-                                "Use only the diagnostic tools supplied by Hark. Never invent tool results."
-                            )
-                        }
-                    ],
-                }
-            ]
-
             operations = [] if memory else ["verify_statement_stats_setting"]
             operations.extend(
                 ["profile_statement_fingerprints", "explain_orders_lookup", "inspect_order_indexes"]
@@ -158,24 +158,38 @@ class RunService:
             while operations:
                 self._check_deadline(started)
                 if tool_calls >= self.settings.max_agent_iterations:
-                    raise InferenceUnavailable("The bounded agent iteration limit was reached.")
+                    raise RuntimeError("The bounded agent iteration limit was reached.")
                 available = [
                     tool_spec(operation, _tool_description(operation)) for operation in operations
                 ]
                 response = self.gateway.converse(
+                    run_id=run_id,
                     system_text=system_text,
-                    messages=messages,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "text": _action_prompt(
+                                        task=task,
+                                        actions=actions,
+                                        evidence=evidence,
+                                    )
+                                }
+                            ],
+                        }
+                    ],
                     tools=available,
                     max_tokens=260,
                 )
+                _record_route(reasoning_route, response)
                 usage = response.get("usage", {})
                 input_tokens += int(usage.get("inputTokens", 0))
                 output_tokens += int(usage.get("outputTokens", 0))
                 message = response.get("output", {}).get("message", {})
-                messages.append(message)
                 tool_use = _first_tool_use(message)
                 if not tool_use or tool_use.get("name") not in operations:
-                    raise InferenceUnavailable("The model did not select a permitted diagnostic action.")
+                    raise RuntimeError("The model did not select a permitted diagnostic action.")
 
                 operation = str(tool_use["name"])
                 tool_calls += 1
@@ -231,35 +245,41 @@ class RunService:
                             "Continue with the production-safe statistics view, EXPLAIN, and index inspection, without elevated privileges.",
                         )
 
-                messages.append(
+            self._check_deadline(started)
+            response = self.gateway.converse(
+                run_id=run_id,
+                system_text=system_text
+                + (
+                    "\nReturn a concise diagnosis grounded only in the tool evidence. "
+                    "State the observed plan/index finding and a safe next action. "
+                    "The answer must be plain text, not Markdown. Do not output SQL or DDL, "
+                    "and do not tell the operator to create, alter, or drop an index."
+                ),
+                messages=[
                     {
                         "role": "user",
                         "content": [
                             {
-                                "toolResult": {
-                                    "toolUseId": tool_use["toolUseId"],
-                                    "content": [{"json": result}],
-                                    "status": "success" if result.get("ok") else "error",
-                                }
+                                "text": _diagnosis_prompt(
+                                    task=task,
+                                    actions=actions,
+                                    evidence=evidence,
+                                )
                             }
                         ],
                     }
-                )
-
-            self._check_deadline(started)
-            response = self.gateway.converse(
-                system_text=system_text
-                + "\nReturn a concise diagnosis grounded only in the tool evidence. State the observed plan/index finding and a safe next action.",
-                messages=messages,
+                ],
                 tools=None,
                 max_tokens=420,
             )
+            _record_route(reasoning_route, response)
             usage = response.get("usage", {})
             input_tokens += int(usage.get("inputTokens", 0))
             output_tokens += int(usage.get("outputTokens", 0))
             diagnosis = _message_text(response.get("output", {}).get("message", {}))
             if not diagnosis:
-                raise InferenceUnavailable("Bedrock returned no diagnosis.")
+                raise RuntimeError("The reasoning provider returned no diagnosis.")
+            _validate_diagnosis(diagnosis)
 
             self.store.add_event(
                 run_id,
@@ -267,13 +287,28 @@ class RunService:
                 "Diagnosis completed",
                 diagnosis,
             )
+            brief, _, _ = experience_brief(failure)
+            try:
+                document_embedding, document_tokens = self.gateway.embed_document(
+                    run_id,
+                    _experience_document(task, brief, diagnosis, actions),
+                )
+                embedding_tokens += document_tokens
+            except InferenceUnavailable as exc:
+                self.store.add_event(
+                    run_id,
+                    "experience_embedding_unavailable",
+                    "Semantic retention unavailable",
+                    "The execution provenance will be retained without a semantic vector.",
+                    {"category": "embedding_unavailable", "provider_error": str(exc)[:240]},
+                )
             persistence_warning = None
             try:
                 experience_id = self.store.persist_experience(
                     run_id=run_id,
                     demo_id=demo_id,
                     task=task,
-                    embedding=embedding,
+                    embedding=document_embedding,
                     failure=failure,
                     diagnosis=diagnosis,
                     actions=actions,
@@ -283,7 +318,17 @@ class RunService:
                     "experience_persisted",
                     "Execution experience persisted",
                     "Derived memory and immutable run provenance are linked in CockroachDB.",
-                    {"experience_id": experience_id, "embedding_persisted": embedding is not None},
+                    {
+                        "experience_id": experience_id,
+                        "embedding_persisted": document_embedding is not None,
+                        "embedding_provider": "google-gemini" if document_embedding else None,
+                        "embedding_model": self.settings.embedding_model_id
+                        if document_embedding
+                        else None,
+                        "embedding_dimensions": self.settings.embedding_dimensions
+                        if document_embedding
+                        else None,
+                    },
                 )
             except Exception:
                 persistence_warning = "Diagnosis completed, but execution memory persistence did not complete."
@@ -303,8 +348,20 @@ class RunService:
                 "memory_used": bool(memory),
                 "memory_similarity": round(memory.similarity, 6) if memory else None,
                 "embedding_tokens": embedding_tokens,
+                "embedding_provider": "google-gemini" if document_embedding else None,
+                "embedding_model": self.settings.embedding_model_id
+                if document_embedding
+                else None,
+                "embedding_dimensions": self.settings.embedding_dimensions
+                if document_embedding
+                else None,
                 "model_input_tokens": input_tokens,
                 "model_output_tokens": output_tokens,
+                "reasoning_provider": reasoning_route[-1]["provider"]
+                if reasoning_route
+                else None,
+                "reasoning_model": reasoning_route[-1]["model"] if reasoning_route else None,
+                "reasoning_route": reasoning_route,
                 "successful": True,
                 "persistence_warning": persistence_warning,
             }
@@ -313,7 +370,7 @@ class RunService:
         except (InferenceUnavailable, TimeoutError) as exc:
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             public_message = (
-                "Amazon Bedrock inference is temporarily unavailable. Hark did not fabricate a diagnosis."
+                "Reasoning capacity is temporarily unavailable. Hark did not fabricate a diagnosis."
             )
             self.store.add_event(
                 run_id,
@@ -332,9 +389,10 @@ class RunService:
                     "failures": failures,
                     "memory_retrieved": bool(memory),
                     "memory_used": bool(memory),
+                    "reasoning_route": reasoning_route,
                     "successful": False,
                 },
-                error_code="BEDROCK_UNAVAILABLE",
+                error_code="INFERENCE_UNAVAILABLE",
                 error_message=public_message,
             )
             return self.store.get_demo(demo_id)
@@ -351,6 +409,7 @@ class RunService:
                         "duration_ms": duration_ms,
                         "tool_calls": tool_calls,
                         "failures": failures,
+                        "reasoning_route": reasoning_route,
                         "successful": False,
                     },
                     error_code="RUN_FAILED",
@@ -377,6 +436,57 @@ class RunService:
     def _check_deadline(self, started: float) -> None:
         if time.perf_counter() - started >= self.settings.run_timeout_seconds:
             raise TimeoutError("The bounded run timeout was reached.")
+
+
+def _action_prompt(*, task: str, actions: list[str], evidence: dict[str, Any]) -> str:
+    evidence_text = json.dumps(evidence, separators=(",", ":"), default=str)[:12000]
+    return (
+        f"Diagnose this supported task: {task}\n"
+        f"Completed diagnostic actions: {json.dumps(actions)}\n"
+        f"Observed evidence: {evidence_text}\n"
+        "Select exactly one of the supplied remaining diagnostic tools. "
+        "Use only the tools supplied by Hark and never invent tool results."
+    )
+
+
+def _diagnosis_prompt(*, task: str, actions: list[str], evidence: dict[str, Any]) -> str:
+    evidence_text = json.dumps(evidence, separators=(",", ":"), default=str)[:18000]
+    return (
+        f"Task: {task}\n"
+        f"Completed diagnostic actions: {json.dumps(actions)}\n"
+        f"Actual tool evidence: {evidence_text}\n"
+        "Return exactly two short plain-text paragraphs: first the evidence-grounded diagnosis, "
+        "then a safe read-only next action. Do not use Markdown, code blocks, SQL, or DDL. "
+        "Do not recommend creating, altering, or dropping an index. Do not invent measurements "
+        "or claim that an action was executed when it was not."
+    )
+
+
+def _experience_document(
+    task: str,
+    brief: str,
+    diagnosis: str,
+    actions: list[str],
+) -> str:
+    return (
+        f"Original task: {task}\n"
+        f"Execution experience: {brief}\n"
+        f"Observed diagnosis: {diagnosis}\n"
+        f"Successful diagnostic actions: {', '.join(actions)}"
+    )[:30000]
+
+
+def _validate_diagnosis(diagnosis: str) -> None:
+    if re.search(r"\b(CREATE|ALTER|DROP|TRUNCATE|GRANT|REVOKE)\s+", diagnosis, re.I):
+        raise RuntimeError("The reasoning response crossed Hark's read-only answer boundary.")
+
+
+def _record_route(route: list[dict[str, str]], response: dict[str, Any]) -> None:
+    provider = str(response.get("provider") or "unknown")
+    model = str(response.get("model") or "unknown")
+    item = {"provider": provider, "model": model}
+    if not route or route[-1] != item:
+        route.append(item)
 
 
 def _load_skill_text() -> str:

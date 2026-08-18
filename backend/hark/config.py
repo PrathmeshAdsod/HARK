@@ -20,9 +20,19 @@ class Settings:
     memory_database_url: str
     diagnostic_database_url: str
     bedrock_model_id: str
+    gemini_api_key: str
+    gemini_primary_model_id: str
+    gemini_tertiary_model_id: str
     embedding_model_id: str
     embedding_dimensions: int
     similarity_threshold: float
+    bedrock_health_ttl_seconds: int
+    gemini_primary_request_budget_per_day: int
+    gemini_tertiary_request_budget_per_day: int
+    gemini_embedding_request_budget_per_day: int
+    gemini_primary_request_limit_per_minute: int
+    gemini_tertiary_request_limit_per_minute: int
+    gemini_embedding_request_limit_per_minute: int
     demo_run_limit_per_day: int
     global_run_limit_per_day: int
     global_total_run_limit: int
@@ -35,8 +45,7 @@ class Settings:
     environment_id: str
 
 
-def _load_ssm_config(region: str) -> dict[str, str]:
-    parameter_name = os.getenv("HARK_DATABASE_PARAMETER", "")
+def _load_ssm_parameter(region: str, parameter_name: str) -> dict[str, str]:
     if not parameter_name:
         return {}
     import boto3
@@ -51,7 +60,8 @@ def _load_ssm_config(region: str) -> dict[str, str]:
 @lru_cache(maxsize=1)
 def load_settings() -> Settings:
     region = os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", "us-east-1"))
-    secure = _load_ssm_config(region)
+    secure = _load_ssm_parameter(region, os.getenv("HARK_DATABASE_PARAMETER", ""))
+    provider_secure = _load_ssm_parameter(region, os.getenv("HARK_PROVIDER_PARAMETER", ""))
     return Settings(
         aws_region=region,
         memory_database_url=os.getenv(
@@ -61,13 +71,33 @@ def load_settings() -> Settings:
             "HARK_DIAGNOSTIC_DATABASE_URL", secure.get("diagnostic_database_url", "")
         ),
         bedrock_model_id=os.getenv("BEDROCK_MODEL_ID", "amazon.nova-micro-v1:0"),
-        embedding_model_id=os.getenv(
-            "BEDROCK_EMBEDDING_MODEL_ID", "amazon.titan-embed-text-v2:0"
-        ),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", provider_secure.get("gemini_api_key", "")),
+        gemini_primary_model_id=os.getenv("GEMINI_PRIMARY_MODEL_ID", "gemini-3.5-flash-lite"),
+        gemini_tertiary_model_id=os.getenv("GEMINI_TERTIARY_MODEL_ID", "gemini-3.1-flash-lite"),
+        embedding_model_id=os.getenv("GEMINI_EMBEDDING_MODEL_ID", "gemini-embedding-2"),
         embedding_dimensions=_int("EMBEDDING_DIMENSIONS", 256),
-        similarity_threshold=_float("MEMORY_SIMILARITY_THRESHOLD", 0.72),
+        similarity_threshold=_float("MEMORY_SIMILARITY_THRESHOLD", 0.73),
+        bedrock_health_ttl_seconds=_int("BEDROCK_HEALTH_TTL_SECONDS", 300),
+        gemini_primary_request_budget_per_day=_int(
+            "HARK_GEMINI_35_REQUEST_BUDGET_PER_DAY", 200
+        ),
+        gemini_tertiary_request_budget_per_day=_int(
+            "HARK_GEMINI_31_REQUEST_BUDGET_PER_DAY", 100
+        ),
+        gemini_embedding_request_budget_per_day=_int(
+            "HARK_GEMINI_EMBEDDING_REQUEST_BUDGET_PER_DAY", 150
+        ),
+        gemini_primary_request_limit_per_minute=_int(
+            "HARK_GEMINI_35_REQUEST_LIMIT_PER_MINUTE", 12
+        ),
+        gemini_tertiary_request_limit_per_minute=_int(
+            "HARK_GEMINI_31_REQUEST_LIMIT_PER_MINUTE", 12
+        ),
+        gemini_embedding_request_limit_per_minute=_int(
+            "HARK_GEMINI_EMBEDDING_REQUEST_LIMIT_PER_MINUTE", 90
+        ),
         demo_run_limit_per_day=_int("DEMO_RUN_LIMIT_PER_DAY", 4),
-        global_run_limit_per_day=_int("GLOBAL_RUN_LIMIT_PER_DAY", 200),
+        global_run_limit_per_day=_int("GLOBAL_RUN_LIMIT_PER_DAY", 40),
         global_total_run_limit=_int("GLOBAL_TOTAL_RUN_LIMIT", 1000),
         max_concurrent_runs=_int("MAX_CONCURRENT_RUNS", 3),
         max_agent_iterations=_int("MAX_AGENT_ITERATIONS", 5),

@@ -29,11 +29,21 @@ def _settings() -> Settings:
         memory_database_url=_role_url("hark_memory", "MemoryTest-2026!"),
         diagnostic_database_url=_role_url("hark_diagnostic", "DiagnosticTest-2026!"),
         bedrock_model_id="amazon.nova-micro-v1:0",
-        embedding_model_id="amazon.titan-embed-text-v2:0",
+        gemini_api_key="test-key",
+        gemini_primary_model_id="gemini-3.5-flash-lite",
+        gemini_tertiary_model_id="gemini-3.1-flash-lite",
+        embedding_model_id="gemini-embedding-2",
         embedding_dimensions=256,
-        similarity_threshold=0.72,
+        similarity_threshold=0.73,
+        bedrock_health_ttl_seconds=300,
+        gemini_primary_request_budget_per_day=200,
+        gemini_tertiary_request_budget_per_day=100,
+        gemini_embedding_request_budget_per_day=150,
+        gemini_primary_request_limit_per_minute=12,
+        gemini_tertiary_request_limit_per_minute=12,
+        gemini_embedding_request_limit_per_minute=90,
         demo_run_limit_per_day=4,
-        global_run_limit_per_day=200,
+        global_run_limit_per_day=40,
         global_total_run_limit=1000,
         max_concurrent_runs=3,
         max_agent_iterations=5,
@@ -78,9 +88,9 @@ def test_real_permissions_recovery_vector_retrieval_and_invalidation():
     assert recalled is not None
     assert recalled.id == experience_id
     unrelated = [0.0, 1.0] + [0.0] * 254
-    assert store.retrieve_experience(demo_id, unrelated, 0.72) is None
+    assert store.retrieve_experience(demo_id, unrelated, 0.73) is None
     weak_match = [0.70, 0.714142842] + [0.0] * 254
-    assert store.retrieve_experience(demo_id, weak_match, 0.72) is None
+    assert store.retrieve_experience(demo_id, weak_match, 0.73) is None
     reactive = store.find_failure_recovery(demo_id, privileged["fingerprint"])
     assert reactive and reactive["experience_id"] == experience_id
 
@@ -108,6 +118,13 @@ def test_per_demo_limit_and_database_lease_concurrency_guard():
     limited_store.create_demo(demo_id)
     run_id = limited_store.reserve_run(
         demo_id, "Investigate why the orders lookup became slower after deployment."
+    )
+    budget_key = f"test-budget-{uuid.uuid4().hex}"
+    assert limited_store.try_consume_provider_request(run_id, budget_key, 1, 1) is True
+    assert limited_store.try_consume_provider_request(run_id, budget_key, 1, 1) is False
+    assert all(
+        event["event_type"] != "provider_request"
+        for event in limited_store.get_demo(demo_id)["runs"][0]["events"]
     )
     limited_store.finish_run(run_id, status="succeeded", diagnosis="verified", metrics={})
     with pytest.raises(CapacityError, match="24-hour run limit"):

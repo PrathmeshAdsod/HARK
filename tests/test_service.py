@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from hark.config import Settings
-from hark.service import InvalidTask, RunService
+from hark.service import InvalidTask, RunService, _validate_diagnosis
 from hark.store import RetrievedExperience
 
 
@@ -15,11 +15,21 @@ def settings() -> Settings:
         memory_database_url="unused",
         diagnostic_database_url="unused",
         bedrock_model_id="amazon.nova-micro-v1:0",
-        embedding_model_id="amazon.titan-embed-text-v2:0",
+        gemini_api_key="test-key",
+        gemini_primary_model_id="gemini-3.5-flash-lite",
+        gemini_tertiary_model_id="gemini-3.1-flash-lite",
+        embedding_model_id="gemini-embedding-2",
         embedding_dimensions=256,
-        similarity_threshold=0.72,
+        similarity_threshold=0.73,
+        bedrock_health_ttl_seconds=300,
+        gemini_primary_request_budget_per_day=200,
+        gemini_tertiary_request_budget_per_day=100,
+        gemini_embedding_request_budget_per_day=150,
+        gemini_primary_request_limit_per_minute=12,
+        gemini_tertiary_request_limit_per_minute=12,
+        gemini_embedding_request_limit_per_minute=90,
         demo_run_limit_per_day=4,
-        global_run_limit_per_day=200,
+        global_run_limit_per_day=40,
         global_total_run_limit=1000,
         max_concurrent_runs=3,
         max_agent_iterations=5,
@@ -32,13 +42,18 @@ def settings() -> Settings:
 
 
 class FakeGateway:
-    def embed(self, text):
+    def embed_query(self, run_id, text):
+        return [1.0] + [0.0] * 255, 12
+
+    def embed_document(self, run_id, text):
         return [1.0] + [0.0] * 255, 12
 
     def converse(self, *, tools=None, **kwargs):
         if tools:
             name = tools[0]["toolSpec"]["name"]
             return {
+                "provider": "test-provider",
+                "model": "test-model",
                 "usage": {"inputTokens": 10, "outputTokens": 2},
                 "output": {
                     "message": {
@@ -48,6 +63,8 @@ class FakeGateway:
                 },
             }
         return {
+            "provider": "test-provider",
+            "model": "test-model",
             "usage": {"inputTokens": 20, "outputTokens": 14},
             "output": {
                 "message": {
@@ -76,6 +93,9 @@ class FakeStore:
 
     def add_event(self, run_id, event_type, title, detail, payload=None):
         self.events.append((run_id, event_type, title, detail, payload or {}))
+
+    def try_consume_provider_request(self, run_id, budget_key, daily_budget, per_minute_limit):
+        return True
 
     def retrieve_experience(self, demo_id, embedding, threshold):
         return self.memory
@@ -153,3 +173,9 @@ def test_execution_kill_switch_blocks_new_runs():
     service = RunService(replace(settings(), execution_enabled=False), store=FakeStore(), gateway=FakeGateway())
     with pytest.raises(Exception, match="paused"):
         service.execute("B" * 32, "Investigate why the orders lookup became slower after deployment.")
+
+
+def test_diagnosis_read_only_boundary_rejects_ddl():
+    _validate_diagnosis("The plan performs a full scan. Review the evidence with the database owner.")
+    with pytest.raises(RuntimeError, match="read-only"):
+        _validate_diagnosis("CREATE INDEX ON orders (customer_id)")

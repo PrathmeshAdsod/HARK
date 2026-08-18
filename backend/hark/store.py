@@ -186,6 +186,62 @@ class Store:
             )
             conn.commit()
 
+    def try_consume_provider_request(
+        self,
+        run_id: str,
+        budget_key: str,
+        daily_budget: int,
+        per_minute_limit: int,
+    ) -> bool:
+        """Atomically reserve one provider request in the existing immutable event ledger."""
+        with connection(self.settings.memory_database_url) as conn:
+            cursor = conn.cursor()
+            try:
+                cursor.execute("SELECT id FROM hark.usage_guard WHERE id=1 FOR UPDATE")
+                cursor.execute(
+                    """
+                    SELECT count(*) FROM hark.run_events
+                    WHERE event_type='provider_request'
+                      AND created_at >= date_trunc('day', now())
+                      AND payload->>'budget_key'=%s
+                    """,
+                    (budget_key,),
+                )
+                if int(cursor.fetchone()[0]) >= daily_budget:
+                    conn.rollback()
+                    return False
+                cursor.execute(
+                    """
+                    SELECT count(*) FROM hark.run_events
+                    WHERE event_type='provider_request'
+                      AND created_at >= date_trunc('minute', now())
+                      AND payload->>'budget_key'=%s
+                    """,
+                    (budget_key,),
+                )
+                if int(cursor.fetchone()[0]) >= per_minute_limit:
+                    conn.rollback()
+                    return False
+                cursor.execute(
+                    """
+                    INSERT INTO hark.run_events (run_id,sequence,event_type,title,detail,payload)
+                    SELECT %s, COALESCE(max(sequence),0)+1, 'provider_request',
+                           'Provider request reserved', 'Server-side provider budget reservation',
+                           %s::JSONB
+                    FROM hark.run_events WHERE run_id=%s
+                    """,
+                    (
+                        run_id,
+                        json.dumps({"budget_key": budget_key}, separators=(",", ":")),
+                        run_id,
+                    ),
+                )
+                conn.commit()
+                return True
+            except Exception:
+                conn.rollback()
+                raise
+
     def retrieve_experience(
         self, demo_id: str, embedding: list[float], threshold: float
     ) -> RetrievedExperience | None:
@@ -263,17 +319,9 @@ class Store:
         actions: list[str],
     ) -> str:
         experience_id = str(uuid.uuid4())
-        limitation = failure["message"] if failure else "No database limitation was encountered."
-        avoid = (failure.get("tool") or failure.get("operation")) if failure else "None"
-        recovery = (
-            "Skip the unavailable cluster-setting preflight; use the production-safe "
-            "statement statistics view, EXPLAIN, and index metadata."
-        )
-        brief = (
-            "Environment: restricted CockroachDB diagnostic role. "
-            f"Known limitation: {limitation} "
-            f"Successful path: {recovery} Avoid: {avoid}."
-        )
+        brief, recovery, avoid = experience_brief(failure)
+        if embedding is not None and len(embedding) != self.settings.embedding_dimensions:
+            raise ValueError("The experience embedding does not match the canonical dimensions.")
         literal = vector_literal(embedding) if embedding else None
         with connection(self.settings.memory_database_url) as conn:
             cursor = conn.cursor()
@@ -382,7 +430,9 @@ class Store:
                 cursor.execute(
                     """
                     SELECT sequence,event_type,title,detail,payload,created_at
-                    FROM hark.run_events WHERE run_id=%s ORDER BY sequence
+                    FROM hark.run_events
+                    WHERE run_id=%s AND event_type <> 'provider_request'
+                    ORDER BY sequence
                     """,
                     (run["id"],),
                 )
@@ -494,6 +544,21 @@ class Store:
                 "message": message,
                 "duration_ms": round((time.perf_counter() - started) * 1000, 2),
             }
+
+
+def experience_brief(failure: dict[str, Any] | None) -> tuple[str, str, str]:
+    limitation = failure["message"] if failure else "No database limitation was encountered."
+    avoid = (failure.get("tool") or failure.get("operation")) if failure else "None"
+    recovery = (
+        "Skip the unavailable cluster-setting preflight; use the production-safe "
+        "statement statistics view, EXPLAIN, and index metadata."
+    )
+    brief = (
+        "Environment: restricted CockroachDB diagnostic role. "
+        f"Known limitation: {limitation} "
+        f"Successful path: {recovery} Avoid: {avoid}."
+    )
+    return brief, recovery, str(avoid)
 
 
 def failure_fingerprint(skill_id: str, environment_id: str, result: dict[str, Any]) -> str:

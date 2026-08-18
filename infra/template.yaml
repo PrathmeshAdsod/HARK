@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: "2010-09-09"
-Description: Hark public Lambda application with bounded Bedrock and SSM access.
+Description: Hark public Lambda application with provider-resilient reasoning and bounded SSM access.
 
 Parameters:
   CodeBucket:
@@ -9,15 +9,24 @@ Parameters:
   ConfigParameterName:
     Type: String
     Default: /hark/prod/database
+  ProviderParameterName:
+    Type: String
+    Default: /hark/prod/providers
   KillSwitchParameterName:
     Type: String
     Default: /hark/prod/execution-enabled
   BedrockModelId:
     Type: String
     Default: amazon.nova-micro-v1:0
-  EmbeddingModelId:
+  GeminiPrimaryModelId:
     Type: String
-    Default: amazon.titan-embed-text-v2:0
+    Default: gemini-3.5-flash-lite
+  GeminiTertiaryModelId:
+    Type: String
+    Default: gemini-3.1-flash-lite
+  GeminiEmbeddingModelId:
+    Type: String
+    Default: gemini-embedding-2
 
 Resources:
   HarkExecutionRole:
@@ -43,13 +52,17 @@ Resources:
                 Action: ssm:GetParameter
                 Resource:
                   - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/hark/prod/database
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/hark/prod/providers
                   - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/hark/prod/execution-enabled
+              - Sid: BedrockAvailability
+                Effect: Allow
+                Action: bedrock:GetFoundationModelAvailability
+                Resource: "*"
               - Sid: BoundedBedrockInference
                 Effect: Allow
                 Action: bedrock:InvokeModel
                 Resource:
                   - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
-                  - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}
 
   HarkFunction:
     Type: AWS::Lambda::Function
@@ -68,19 +81,29 @@ Resources:
       Environment:
         Variables:
           HARK_DATABASE_PARAMETER: !Ref ConfigParameterName
+          HARK_PROVIDER_PARAMETER: !Ref ProviderParameterName
           HARK_KILL_SWITCH_PARAMETER: !Ref KillSwitchParameterName
           BEDROCK_MODEL_ID: !Ref BedrockModelId
-          BEDROCK_EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          GEMINI_PRIMARY_MODEL_ID: !Ref GeminiPrimaryModelId
+          GEMINI_TERTIARY_MODEL_ID: !Ref GeminiTertiaryModelId
+          GEMINI_EMBEDDING_MODEL_ID: !Ref GeminiEmbeddingModelId
           EMBEDDING_DIMENSIONS: "256"
-          MEMORY_SIMILARITY_THRESHOLD: "0.72"
+          MEMORY_SIMILARITY_THRESHOLD: "0.73"
+          BEDROCK_HEALTH_TTL_SECONDS: "300"
+          HARK_GEMINI_35_REQUEST_BUDGET_PER_DAY: "200"
+          HARK_GEMINI_31_REQUEST_BUDGET_PER_DAY: "100"
+          HARK_GEMINI_EMBEDDING_REQUEST_BUDGET_PER_DAY: "150"
+          HARK_GEMINI_35_REQUEST_LIMIT_PER_MINUTE: "12"
+          HARK_GEMINI_31_REQUEST_LIMIT_PER_MINUTE: "12"
+          HARK_GEMINI_EMBEDDING_REQUEST_LIMIT_PER_MINUTE: "90"
           DEMO_RUN_LIMIT_PER_DAY: "4"
-          GLOBAL_RUN_LIMIT_PER_DAY: "200"
+          GLOBAL_RUN_LIMIT_PER_DAY: "40"
           GLOBAL_TOTAL_RUN_LIMIT: "1000"
           MAX_CONCURRENT_RUNS: "3"
           MAX_AGENT_ITERATIONS: "5"
           RUN_TIMEOUT_SECONDS: "60"
           DEMO_RETENTION_DAYS: "45"
-          HARK_ENVIRONMENT_ID: restricted-orders-demo-v1
+          HARK_ENVIRONMENT_ID: restricted-orders-gemini-embedding-2-256-v1
           EXECUTION_ENABLED: "true"
       Tags:
         - Key: Project

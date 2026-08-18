@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="Hark adds durable execution experience to Agent Skills." />
     <title>Hark — Execution memory for Agent Skills</title>
-    <link rel="stylesheet" href="/assets/styles.css?v=20260818.1" />
+    <link rel="stylesheet" href="/assets/styles.css?v=20260818.2" />
   </head>
   <body>
     <div class="ambient ambient-one" aria-hidden="true"></div>
@@ -18,8 +18,8 @@
       </a>
       <nav class="top-actions" aria-label="Primary navigation">
         <a href="https://github.com/PrathmeshAdsod/HARK" target="_blank" rel="noreferrer">Source</a>
-        <button class="text-button hidden" id="copy-link" type="button">Copy demo link</button>
-        <button class="button button-small hidden" id="fresh-demo" type="button">Start fresh demo</button>
+        <button class="text-button hidden" id="copy-link" type="button">Copy investigation link</button>
+        <button class="button button-small hidden" id="fresh-demo" type="button">Start fresh</button>
       </nav>
     </header>
 
@@ -35,9 +35,9 @@
             </p>
             <div class="hero-actions">
               <button id="start-demo" class="button button-primary" type="button">
-                Run the Cold → Warm demo <span aria-hidden="true">↗</span>
+                Investigate query regression <span aria-hidden="true">↗</span>
               </button>
-              <span class="hero-note">No login. A private, shareable demo is created for you.</span>
+              <span class="hero-note">See how execution experience changes the next investigation.</span>
             </div>
           </div>
 
@@ -62,9 +62,9 @@
           <p>One focused workflow</p>
           <h2>CockroachDB query regression diagnosis,<br />improved by what happened last time.</h2>
           <div class="thesis-points">
-            <article><span>Cold</span><p>No precedent. A cluster-setting preflight hits a real database-enforced boundary, then the Skill recovers safely.</p></article>
-            <article><span>Persist</span><p>Evidence, recovery, provenance, and a Bedrock embedding are committed to CockroachDB.</p></article>
-            <article><span>Warm</span><p>A fresh run recalls the relevant experience and avoids the known bad path.</p></article>
+            <article><span>Investigate</span><p>With no precedent, a cluster-setting preflight hits a real database boundary and the Skill recovers safely.</p></article>
+            <article><span>Retain</span><p>Evidence, recovery, provenance, and a canonical execution embedding are committed to CockroachDB.</p></article>
+            <article><span>Recall</span><p>A related investigation finds that experience and avoids the known dead end.</p></article>
           </div>
         </div>
 
@@ -84,12 +84,12 @@
       <section id="workspace" class="workspace hidden" aria-live="polite">
         <div class="workspace-intro">
           <div>
-            <p class="eyebrow"><span></span> Live execution laboratory</p>
-            <h1>Cold learns.<br /><em>Warm remembers.</em></h1>
+            <p class="eyebrow"><span></span> CockroachDB query regression</p>
+            <h1>Investigate once.<br /><em>Remember what worked.</em></h1>
           </div>
           <div class="demo-meta">
             <span class="status-dot"></span>
-            <div><small>Anonymous demo</small><code id="demo-short">—</code></div>
+            <div><small>Investigation</small><code id="demo-short">—</code></div>
             <div><small>Run allowance</small><strong id="run-allowance">0 / 4</strong></div>
           </div>
         </div>
@@ -97,12 +97,12 @@
         <div class="workspace-grid">
           <section class="run-column">
             <div class="panel composer-panel">
-              <div class="panel-label"><span id="run-mode">Cold run</span><i>Query regression diagnosis</i></div>
+              <div class="panel-label"><span id="run-mode">No prior experience</span><i>Query regression diagnosis</i></div>
               <label for="task-input">What changed?</label>
               <textarea id="task-input" maxlength="400" rows="4"></textarea>
               <div class="composer-footer">
-                <p id="composer-hint">The first run starts without execution experience.</p>
-                <button id="run-task" class="button button-primary" type="button">Run diagnostic <span>↗</span></button>
+                <p id="composer-hint">The first investigation starts without execution experience.</p>
+                <button id="run-task" class="button button-primary" type="button">Investigate <span>↗</span></button>
               </div>
             </div>
 
@@ -130,7 +130,7 @@
     <div id="loading" class="loading-layer hidden" role="status" aria-live="assertive">
       <div class="loader-signal"><i></i><i></i><i></i></div>
       <strong>Hark is executing the Skill</strong>
-      <span>Real Bedrock inference and CockroachDB tools can take a moment.</span>
+      <span>Provider-resilient reasoning and real CockroachDB tools can take a moment.</span>
     </div>
     <div id="toast" class="toast hidden" role="alert"></div>
 
@@ -139,6 +139,6 @@
       <p>Execution memory for Agent Skills.</p>
       <p>Built with CockroachDB + AWS.</p>
     </footer>
-    <script src="/assets/app.js?v=20260818.1" defer></script>
+    <script src="/assets/app.js?v=20260818.2" defer></script>
   </body>
 </html>

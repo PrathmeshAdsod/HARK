@@ -36,7 +36,7 @@ async function api(path, options = {}) {
 }
 
 async function startDemo() {
-  setLoading(true, "Creating your isolated demo");
+  setLoading(true, "Starting a fresh investigation");
   try {
     const result = await api("/api/demos", { method: "POST", body: "{}" });
     history.pushState({}, "", result.url);
@@ -50,7 +50,7 @@ async function startDemo() {
 }
 
 async function loadDemo(showLoader = true) {
-  if (showLoader) setLoading(true, "Restoring this demo from CockroachDB");
+  if (showLoader) setLoading(true, "Restoring this investigation from CockroachDB");
   try {
     state.demo = await api(`/api/demos/${state.demoId}`);
     render();
@@ -114,12 +114,12 @@ function render() {
   $("#run-allowance").textContent = `${demo.limits.runs_used_24h} / ${demo.limits.runs_allowed_24h}`;
   $("#memory-count").textContent = String(experiences.filter((item) => !item.invalidated_at).length);
 
-  const isWarm = experiences.some((item) => !item.invalidated_at);
-  $("#run-mode").textContent = isWarm ? "Warm run" : "Cold run";
-  $("#task-input").value = isWarm ? warmPrompt : coldPrompt;
-  $("#composer-hint").textContent = isWarm
+  const hasExperience = experiences.some((item) => !item.invalidated_at);
+  $("#run-mode").textContent = hasExperience ? "Prior experience found" : "No prior experience";
+  $("#task-input").value = hasExperience ? warmPrompt : coldPrompt;
+  $("#composer-hint").textContent = hasExperience
     ? "Hark will search prior execution experience before the Skill runs."
-    : "The first run starts without execution experience.";
+    : "The first investigation starts without execution experience.";
   $("#run-task").disabled = runs.length >= demo.limits.runs_allowed_24h;
 
   renderMemories(experiences);
@@ -130,7 +130,7 @@ function render() {
 function renderMemories(experiences) {
   const list = $("#memory-list");
   if (!experiences.length) {
-    list.innerHTML = `<div class="empty-memory"><div class="empty-glyph">H</div><b>No execution experience yet</b><p>The Cold run will leave a compact, provenance-backed memory here.</p></div>`;
+    list.innerHTML = `<div class="empty-memory"><div class="empty-glyph">H</div><b>No execution experience yet</b><p>The first investigation will leave compact, provenance-backed memory here.</p></div>`;
     return;
   }
   list.innerHTML = experiences
@@ -167,12 +167,12 @@ function renderRuns(runs) {
         .join("");
       return `<article class="panel run-card">
         <header class="run-summary">
-          <div><span class="run-tag ${failed ? "failed" : ""}"><i></i>${warm ? "Warm" : "Cold"} run · ${failed ? "did not complete" : "completed"}</span><h2>${escapeHtml(shorten(run.task, 78))}</h2></div>
+          <div><span class="run-tag ${failed ? "failed" : ""}"><i></i>${warm ? "Prior experience used" : "No prior experience"} · ${failed ? "did not complete" : "completed"}</span><h2>${escapeHtml(shorten(run.task, 78))}</h2></div>
           <div class="metric-strip"><div><b>${formatDuration(metrics.duration_ms)}</b><span>duration</span></div><div><b>${metrics.tool_calls ?? 0}</b><span>tool calls</span></div><div><b>${metrics.failures ?? 0}</b><span>failures</span></div></div>
         </header>
         <div class="run-body">
           <section class="trace"><h3>Execution trace · Run ${originalIndex + 1}</h3>${events || "<p>No events were recorded.</p>"}</section>
-          <section class="diagnosis"><h3>${failed ? "Truthful failure" : "Bedrock diagnosis"}</h3><blockquote class="${failed ? "error-copy" : ""}">${escapeHtml(run.diagnosis || run.error_message || "No diagnosis was produced.")}</blockquote></section>
+          <section class="diagnosis"><h3>${failed ? "Truthful failure" : "Evidence-grounded diagnosis"}</h3><blockquote class="${failed ? "error-copy" : ""}">${escapeHtml(run.diagnosis || run.error_message || "No diagnosis was produced.")}</blockquote></section>
         </div>
       </article>`;
     })
@@ -186,12 +186,12 @@ function renderComparison(runs) {
     panel.innerHTML = "";
     return;
   }
-  const [cold, warm] = runs.slice(-2);
-  const coldMetrics = cold.metrics || {};
-  const warmMetrics = warm.metrics || {};
+  const [first, related] = runs.slice(-2);
+  const firstMetrics = first.metrics || {};
+  const relatedMetrics = related.metrics || {};
   panel.classList.remove("hidden");
-  panel.innerHTML = `<header><h2>Cold vs Warm</h2><span>Measured from these runs</span></header>
-    <div class="compare-grid">${comparisonRun("Cold · no precedent", coldMetrics)}<div class="compare-arrow">→</div>${comparisonRun(warmMetrics.memory_used ? "Warm · memory used" : "Second run", warmMetrics)}</div>`;
+  panel.innerHTML = `<header><h2>First vs related</h2><span>Measured from these executions</span></header>
+    <div class="compare-grid">${comparisonRun("First · no precedent", firstMetrics)}<div class="compare-arrow">→</div>${comparisonRun(relatedMetrics.memory_used ? "Related · experience used" : "Related investigation", relatedMetrics)}</div>`;
 }
 
 function comparisonRun(label, metrics) {
@@ -201,7 +201,7 @@ function comparisonRun(label, metrics) {
 async function copyLink() {
   try {
     await navigator.clipboard.writeText(location.href);
-    toast("Shareable demo link copied.");
+    toast("Shareable investigation link copied.");
   } catch {
     toast("Copy was blocked by the browser. Use the current address-bar URL.");
   }

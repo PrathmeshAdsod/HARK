@@ -1,11 +1,14 @@
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
 from typing import Any
 
 
 class InferenceUnavailable(RuntimeError):
+    pass
+
+
+class ProviderRequestInvalid(RuntimeError):
     pass
 
 
@@ -21,37 +24,25 @@ class AgentResult:
 
 
 class BedrockGateway:
-    def __init__(self, region: str, model_id: str, embedding_model_id: str, dimensions: int):
+    def __init__(self, region: str, model_id: str):
         import boto3
 
-        self.client = boto3.client("bedrock-runtime", region_name=region)
+        self.control_client = boto3.client("bedrock", region_name=region)
+        self.runtime_client = boto3.client("bedrock-runtime", region_name=region)
         self.model_id = model_id
-        self.embedding_model_id = embedding_model_id
-        self.dimensions = dimensions
 
-    def embed(self, text: str) -> tuple[list[float], int]:
+    def is_authorized(self) -> bool:
         try:
-            response = self.client.invoke_model(
-                modelId=self.embedding_model_id,
-                contentType="application/json",
-                accept="application/json",
-                body=json.dumps(
-                    {
-                        "inputText": text[:50000],
-                        "dimensions": self.dimensions,
-                        "normalize": True,
-                    }
-                ),
+            response = self.control_client.get_foundation_model_availability(
+                modelId=self.model_id
             )
-            payload = json.loads(response["body"].read())
-            embedding = payload.get("embedding")
-            if not isinstance(embedding, list) or len(embedding) != self.dimensions:
-                raise InferenceUnavailable("Embedding response had an unexpected shape.")
-            return [float(value) for value in embedding], int(payload.get("inputTextTokenCount", 0))
-        except InferenceUnavailable:
-            raise
+            return bool(
+                response.get("authorizationStatus") == "AUTHORIZED"
+                and response.get("entitlementAvailability") == "AVAILABLE"
+                and response.get("regionAvailability") == "AVAILABLE"
+            )
         except Exception as exc:
-            raise InferenceUnavailable(_safe_model_error(exc)) from exc
+            raise InferenceUnavailable(_safe_model_error(exc, "Bedrock availability check")) from exc
 
     def converse(
         self,
@@ -74,19 +65,53 @@ class BedrockGateway:
         if tools:
             request["toolConfig"] = {"tools": tools, "toolChoice": {"any": {}}}
         try:
-            return self.client.converse(**request)
+            response = self.runtime_client.converse(**request)
+            response["provider"] = "amazon-bedrock"
+            response["model"] = self.model_id
+            return response
         except Exception as exc:
-            raise InferenceUnavailable(_safe_model_error(exc)) from exc
+            message = _safe_model_error(exc, "Bedrock inference")
+            if _is_provider_failure(exc):
+                raise InferenceUnavailable(message) from exc
+            raise ProviderRequestInvalid(message) from exc
 
 
-def _safe_model_error(exc: Exception) -> str:
+def _is_provider_failure(exc: Exception) -> bool:
+    response = getattr(exc, "response", None)
+    if not isinstance(response, dict):
+        return isinstance(exc, (TimeoutError, ConnectionError)) or type(exc).__name__ in {
+            "ConnectTimeoutError",
+            "ConnectionClosedError",
+            "EndpointConnectionError",
+            "HTTPClientError",
+            "ProxyConnectionError",
+            "ReadTimeoutError",
+        }
+    error = response.get("Error", {})
+    code = str(error.get("Code", ""))
+    message = str(error.get("Message", "")).lower()
+    if code == "ValidationException":
+        return "operation not allowed" in message or "not authorized" in message
+    return code in {
+        "AccessDeniedException",
+        "InternalServerException",
+        "ModelErrorException",
+        "ModelNotReadyException",
+        "ModelStreamErrorException",
+        "ModelTimeoutException",
+        "ServiceUnavailableException",
+        "ThrottlingException",
+    }
+
+
+def _safe_model_error(exc: Exception, action: str = "Bedrock request") -> str:
     response = getattr(exc, "response", None)
     if isinstance(response, dict):
         error = response.get("Error", {})
         code = str(error.get("Code", "BedrockError"))
-        message = str(error.get("Message", "Inference request failed."))
+        message = str(error.get("Message", f"{action} failed."))
         return f"{code}: {message}"[:300]
-    return f"{type(exc).__name__}: inference request failed"[:300]
+    return f"{type(exc).__name__}: {action} failed"[:300]
 
 
 def tool_spec(name: str, description: str) -> dict[str, Any]:
