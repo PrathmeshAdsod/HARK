@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="Hark adds durable execution experience to Agent Skills." />
+    <title>Hark — Execution memory for Agent Skills</title>
+    <link rel="stylesheet" href="/assets/styles.css?v=20260818.1" />
+  </head>
+  <body>
+    <div class="ambient ambient-one" aria-hidden="true"></div>
+    <div class="ambient ambient-two" aria-hidden="true"></div>
+
+    <header class="site-header">
+      <a class="brand" href="/" aria-label="Hark home">
+        <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+        <span>Hark</span>
+      </a>
+      <nav class="top-actions" aria-label="Primary navigation">
+        <a href="https://github.com/PrathmeshAdsod/HARK" target="_blank" rel="noreferrer">Source</a>
+        <button class="text-button hidden" id="copy-link" type="button">Copy demo link</button>
+        <button class="button button-small hidden" id="fresh-demo" type="button">Start fresh demo</button>
+      </nav>
+    </header>
+
+    <main>
+      <section id="landing" class="landing">
+        <div class="hero-grid">
+          <div class="hero-copy reveal">
+            <p class="eyebrow"><span></span> Execution intelligence, carried forward</p>
+            <h1>Skills know the procedure.<br /><em>Hark remembers the work.</em></h1>
+            <p class="hero-lede">
+              Execution memory for Agent Skills. Hark turns real outcomes, failures, and recoveries into
+              precise experience that improves the next run—without changing the Skill or retraining the model.
+            </p>
+            <div class="hero-actions">
+              <button id="start-demo" class="button button-primary" type="button">
+                Run the Cold → Warm demo <span aria-hidden="true">↗</span>
+              </button>
+              <span class="hero-note">No login. A private, shareable demo is created for you.</span>
+            </div>
+          </div>
+
+          <div class="memory-orbit reveal delay-one" aria-label="Hark execution memory loop">
+            <div class="orbit-surface">
+              <div class="orbit-core">
+                <span>H</span>
+                <small>experience<br />in motion</small>
+              </div>
+              <div class="orbit-path path-one"></div>
+              <div class="orbit-path path-two"></div>
+              <div class="orbit-node node-skill"><b>01</b><span>Skill</span></div>
+              <div class="orbit-node node-execute"><b>02</b><span>Execute</span></div>
+              <div class="orbit-node node-recall"><b>03</b><span>Recall</span></div>
+              <div class="signal-dot dot-one"></div>
+              <div class="signal-dot dot-two"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="thesis-band reveal delay-two">
+          <p>One focused workflow</p>
+          <h2>CockroachDB query regression diagnosis,<br />improved by what happened last time.</h2>
+          <div class="thesis-points">
+            <article><span>Cold</span><p>No precedent. A cluster-setting preflight hits a real database-enforced boundary, then the Skill recovers safely.</p></article>
+            <article><span>Persist</span><p>Evidence, recovery, provenance, and a Bedrock embedding are committed to CockroachDB.</p></article>
+            <article><span>Warm</span><p>A fresh run recalls the relevant experience and avoids the known bad path.</p></article>
+          </div>
+        </div>
+
+        <section class="proof-section reveal">
+          <div>
+            <p class="eyebrow"><span></span> Real by construction</p>
+            <h2>Not chat history.<br />Execution evidence.</h2>
+          </div>
+          <div class="proof-list">
+            <article><b>01</b><div><h3>Database-enforced boundaries</h3><p>A restricted SQL identity—not a prompt—blocks privileged cluster-setting inspection.</p></div></article>
+            <article><b>02</b><div><h3>Two ways to remember</h3><p>Filtered vector recall before a run. Deterministic failure fingerprints during it.</p></div></article>
+            <article><b>03</b><div><h3>Auditable influence</h3><p>Every derived memory links back to its source run and forward to every run it influenced.</p></div></article>
+          </div>
+        </section>
+      </section>
+
+      <section id="workspace" class="workspace hidden" aria-live="polite">
+        <div class="workspace-intro">
+          <div>
+            <p class="eyebrow"><span></span> Live execution laboratory</p>
+            <h1>Cold learns.<br /><em>Warm remembers.</em></h1>
+          </div>
+          <div class="demo-meta">
+            <span class="status-dot"></span>
+            <div><small>Anonymous demo</small><code id="demo-short">—</code></div>
+            <div><small>Run allowance</small><strong id="run-allowance">0 / 4</strong></div>
+          </div>
+        </div>
+
+        <div class="workspace-grid">
+          <section class="run-column">
+            <div class="panel composer-panel">
+              <div class="panel-label"><span id="run-mode">Cold run</span><i>Query regression diagnosis</i></div>
+              <label for="task-input">What changed?</label>
+              <textarea id="task-input" maxlength="400" rows="4"></textarea>
+              <div class="composer-footer">
+                <p id="composer-hint">The first run starts without execution experience.</p>
+                <button id="run-task" class="button button-primary" type="button">Run diagnostic <span>↗</span></button>
+              </div>
+            </div>
+
+            <div id="comparison" class="panel comparison-panel hidden"></div>
+            <div id="results"></div>
+          </section>
+
+          <aside class="memory-column">
+            <div class="panel memory-panel">
+              <div class="panel-heading">
+                <div><p class="panel-kicker">CockroachDB memory</p><h2>Experience ledger</h2></div>
+                <span id="memory-count" class="count-chip">0</span>
+              </div>
+              <div id="memory-list" class="memory-list"></div>
+            </div>
+            <div class="boundary-note">
+              <span class="boundary-icon">⌁</span>
+              <div><b>Safety boundary</b><p>Only four fixed, read-only diagnostic operations can reach the database. User text never becomes SQL.</p></div>
+            </div>
+          </aside>
+        </div>
+      </section>
+    </main>
+
+    <div id="loading" class="loading-layer hidden" role="status" aria-live="assertive">
+      <div class="loader-signal"><i></i><i></i><i></i></div>
+      <strong>Hark is executing the Skill</strong>
+      <span>Real Bedrock inference and CockroachDB tools can take a moment.</span>
+    </div>
+    <div id="toast" class="toast hidden" role="alert"></div>
+
+    <footer>
+      <span>Hark</span>
+      <p>Execution memory for Agent Skills.</p>
+      <p>Built with CockroachDB + AWS.</p>
+    </footer>
+    <script src="/assets/app.js?v=20260818.1" defer></script>
+  </body>
+</html>

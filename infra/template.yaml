@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Hark public Lambda application with bounded Bedrock and SSM access.
+
+Parameters:
+  CodeBucket:
+    Type: String
+  CodeKey:
+    Type: String
+  ConfigParameterName:
+    Type: String
+    Default: /hark/prod/database
+  KillSwitchParameterName:
+    Type: String
+    Default: /hark/prod/execution-enabled
+  BedrockModelId:
+    Type: String
+    Default: amazon.nova-micro-v1:0
+  EmbeddingModelId:
+    Type: String
+    Default: amazon.titan-embed-text-v2:0
+
+Resources:
+  HarkExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: hark-prod-lambda-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: HarkRuntimeLeastPrivilege
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: ReadOnlyHarkParameters
+                Effect: Allow
+                Action: ssm:GetParameter
+                Resource:
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/hark/prod/database
+                  - !Sub arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter/hark/prod/execution-enabled
+              - Sid: BoundedBedrockInference
+                Effect: Allow
+                Action: bedrock:InvokeModel
+                Resource:
+                  - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${BedrockModelId}
+                  - !Sub arn:${AWS::Partition}:bedrock:${AWS::Region}::foundation-model/${EmbeddingModelId}
+
+  HarkFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: hark-prod
+      Description: Execution memory for Agent Skills.
+      Runtime: python3.12
+      Architectures: [x86_64]
+      Handler: hark.web.lambda_handler
+      Role: !GetAtt HarkExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref CodeBucket
+        S3Key: !Ref CodeKey
+      MemorySize: 512
+      Timeout: 90
+      Environment:
+        Variables:
+          HARK_DATABASE_PARAMETER: !Ref ConfigParameterName
+          HARK_KILL_SWITCH_PARAMETER: !Ref KillSwitchParameterName
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          BEDROCK_EMBEDDING_MODEL_ID: !Ref EmbeddingModelId
+          EMBEDDING_DIMENSIONS: "256"
+          MEMORY_SIMILARITY_THRESHOLD: "0.72"
+          DEMO_RUN_LIMIT_PER_DAY: "4"
+          GLOBAL_RUN_LIMIT_PER_DAY: "200"
+          GLOBAL_TOTAL_RUN_LIMIT: "1000"
+          MAX_CONCURRENT_RUNS: "3"
+          MAX_AGENT_ITERATIONS: "5"
+          RUN_TIMEOUT_SECONDS: "60"
+          DEMO_RETENTION_DAYS: "45"
+          HARK_ENVIRONMENT_ID: restricted-orders-demo-v1
+          EXECUTION_ENABLED: "true"
+      Tags:
+        - Key: Project
+          Value: Hark
+        - Key: Environment
+          Value: production
+
+  HarkFunctionUrl:
+    Type: AWS::Lambda::Url
+    Properties:
+      AuthType: NONE
+      InvokeMode: BUFFERED
+      TargetFunctionArn: !GetAtt HarkFunction.Arn
+
+  PublicFunctionUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunctionUrl
+      FunctionName: !Ref HarkFunction
+      FunctionUrlAuthType: NONE
+      Principal: "*"
+
+  PublicFunctionInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref HarkFunction
+      InvokedViaFunctionUrl: true
+      Principal: "*"
+
+Outputs:
+  PublicUrl:
+    Description: Public Hark website.
+    Value: !GetAtt HarkFunctionUrl.FunctionUrl
+  FunctionName:
+    Value: !Ref HarkFunction
