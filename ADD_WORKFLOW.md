@@ -1,54 +1,81 @@
-# Add a workflow to Hark
+# Add your workflow to Hark
 
-Hark's core idea is independent of a specific incident type: **procedure comes from an Agent Skill; execution creates experience; CockroachDB carries the relevant experience into later runs.**
+[← README](README.md) · [Setup & operations](SETUP.md)
 
-A workflow connects that memory plane to a concrete Skill, environment, and safe tool surface. The repository ships with a CockroachDB query-regression workflow, and the same pattern can be repeated for infrastructure, CI/CD, security, data, coding, or other operational agents.
+Hark is built around a reusable idea:
 
-## The workflow contract
+> **Agent Skills provide procedure. Hark carries forward what execution taught the agent.**
 
-Every Hark workflow needs four things:
-
-1. **Skill** — the `SKILL.md` or equivalent procedure the agent should follow.
-2. **Scope** — stable `skill_id`, `workflow`, and `environment_id` values so memories are retrieved only where they belong.
-3. **Safe tools** — explicit operations the model may choose from; user text should never become arbitrary privileged execution.
-4. **Environment adapter** — the code that runs those operations against the real target system and returns structured evidence.
-
-The memory semantics stay the same:
+A workflow connects that memory plane to a concrete Skill, environment, and safe tool surface. The repository includes a fully working CockroachDB query-regression workflow; you can extend the same architecture to additional operational workflows without changing Hark's core memory semantics.
 
 ```text
-task
-  -> scoped memory search
-  -> Skill + retrieved experience
-  -> bounded tool execution
-  -> evidence / failure / recovery / outcome
-  -> experience embedding + CockroachDB persistence
-  -> later related task retrieves that experience
-  -> provenance records exactly what influenced the run
+Skill + scope + safe tools + real environment adapter
+                         │
+                         ▼
+                    Hark runtime
+                         │
+                 execution evidence
+                         │
+                         ▼
+                  CockroachDB memory
+                 ├─ run/event history
+                 ├─ derived experience
+                 ├─ vector retrieval
+                 ├─ failure recovery
+                 ├─ provenance
+                 └─ invalidation
+                         │
+                         ▼
+                 next related execution
 ```
 
-Hark's existing CockroachDB tables already separate experience by Skill, workflow, environment, source run, and later use. Each additional workflow should preserve that isolation.
+## What a workflow provides
 
-## Fast path: use a coding agent
+Every workflow needs four pieces:
 
-A coding agent can inspect the repository and extend the existing pattern. Give it the new Skill, the target environment, and the operations you are willing to expose.
+1. **Skill** — the `SKILL.md` or equivalent procedure the agent follows.
+2. **Scope** — stable `skill_id`, `workflow`, and `environment_id` values so memory stays where it belongs.
+3. **Safe tools** — explicit operations the reasoning model may choose from.
+4. **Environment adapter** — code that executes those operations against the real target system and returns structured evidence.
 
-Example prompt:
+Everything below that boundary can preserve the same Hark behavior:
+
+- scoped memory search before acting,
+- immutable execution events,
+- experience derivation from real outcomes,
+- semantic vector retrieval,
+- deterministic failure recovery,
+- source-run and later-use provenance,
+- invalidation without deleting audit history,
+- provider routing and execution budgets.
+
+A deployment can add additional workflow implementations while keeping memory isolated by Skill, workflow, and environment.
+
+---
+
+## Fastest path: use a coding agent
+
+Because the repository already contains one complete production implementation, a coding agent can inspect that pattern and build another workflow around the same Hark core.
+
+### Example prompt
 
 ```text
-Extend this Hark repository with a Kubernetes incident-diagnosis workflow.
+Add a Kubernetes incident-diagnosis workflow to this Hark repository.
 
-First inspect the existing query-regression workflow and preserve Hark's memory semantics, provenance, retrieval, invalidation, provider routing, budgets, and security boundaries.
+Inspect the existing query-regression workflow first. Preserve Hark's memory semantics, scoped retrieval, provenance, invalidation, provider routing, budgets, and security boundaries.
 
-Add the Kubernetes Skill under backend/skills, give the workflow its own skill/workflow/environment scope, and implement only explicit read-only tools such as pod status, recent events, deployment inspection, and container logs. Wire task validation, tool descriptions, execution evidence, tests, and documentation by following the existing Hark pattern. Do not weaken or remove the current workflow.
-
-Finish by running the test suite and documenting how to configure the target environment safely.
+Add the Kubernetes Skill, a unique skill/workflow/environment scope, explicit read-only tools for pod status, recent events, deployment inspection and logs, and a real Kubernetes environment adapter. Add task validation, tests, and setup documentation. Keep the existing workflow working.
 ```
 
-The important instruction is **preserve Hark's memory plane; replace or add only the workflow-specific procedure, scope, tools, and environment integration.**
+That is usually enough for a capable coding agent to understand where the workflow-specific code ends and Hark's reusable memory plane begins.
+
+The key instruction is:
+
+> **Extend the workflow layer; preserve the memory plane.**
+
+---
 
 ## Manual path
-
-If you prefer to add a workflow yourself:
 
 ### 1. Add the Skill
 
@@ -58,73 +85,161 @@ Place the Skill under:
 backend/skills/<your-skill>/SKILL.md
 ```
 
-Pin or version external Skills so an execution can always be traced back to the procedure that produced it.
+Pin or version externally sourced Skills so each execution remains traceable to the exact procedure used.
 
-### 2. Give it a memory scope
+### 2. Give the workflow its own scope
 
-Define a distinct:
+Define distinct values for:
 
 ```text
 skill_id
-environment_id
 workflow
+environment_id
 ```
 
-Hark uses these fields before vector ranking so experience from one environment or workflow does not silently influence another.
+Hark scopes eligible experience before vector ranking. That keeps memories from unrelated workflows or environments from contaminating one another.
 
-### 3. Define the allowed tools
+### 3. Define the safe tool surface
 
-Follow the existing bounded-tool pattern in `backend/hark/service.py` and `backend/hark/store.py`:
+Follow the current bounded-tool pattern in:
 
-- expose only operations the workflow genuinely needs,
-- describe them clearly for the reasoning model,
+```text
+backend/hark/service.py
+backend/hark/store.py
+```
+
+A good workflow tool should:
+
+- perform one explicit operation,
 - return structured evidence,
-- keep destructive or privileged actions outside the surface unless the workflow explicitly requires and governs them.
+- have a clear description for the reasoning model,
+- use least privilege,
+- avoid turning arbitrary user text directly into privileged execution.
+
+For example, a Kubernetes workflow might expose:
+
+```text
+get_pod_status
+read_recent_events
+inspect_deployment
+read_container_logs
+```
+
+A CI/CD workflow might expose:
+
+```text
+get_failed_stage
+read_job_logs
+inspect_pipeline_config
+read_recent_runs
+```
+
+The model can choose dynamically among allowed tools, while the workflow controls what can actually execute.
 
 ### 4. Connect the real environment
 
-Implement the operation layer against the target system: Kubernetes, GitHub, a database, cloud APIs, CI/CD, or another service. Credentials stay server-side and should be least-privilege.
+Implement those operations against the target system:
 
-### 5. Keep the Hark memory loop
+- Kubernetes,
+- GitHub,
+- CI/CD,
+- another database,
+- cloud APIs,
+- security tooling,
+- repository tooling,
+- or another operational environment.
 
-Reuse the existing sequence:
+Keep credentials server-side and give the workflow only the permissions its tools require.
 
-- embed the incoming task,
-- retrieve scoped prior experience,
-- inject the Experience Brief,
-- record immutable run events,
-- derive experience from the completed execution,
-- persist its embedding and provenance,
-- link every later use back to its source experience,
-- preserve invalidation.
+### 5. Preserve the Hark memory loop
 
-### 6. Test first-run and related-run behavior
-
-For every workflow, test both sides of the idea:
-
-- a first run with no useful precedent,
-- a related run where retrieved experience changes the execution path or recovery behavior.
-
-The second run should still gather fresh evidence; memory is guidance from prior execution, not a cached answer.
-
-## Example workflow ideas
+The workflow should continue through the same semantic sequence:
 
 ```text
-Kubernetes incident response
-Skill: deployment / pod triage
-Experience: known RBAC boundary, successful log path, recovery sequence
-
-CI/CD failure diagnosis
-Skill: pipeline investigation
-Experience: environment-specific flaky stage, cache failure, successful fallback
-
-Security investigation
-Skill: alert triage
-Experience: noisy signal source, validated evidence path, safe escalation route
-
-Repository maintenance
-Skill: codebase diagnosis
-Experience: project-specific test command, generated-file boundary, recovery from known tooling failure
+incoming task
+    ↓
+scoped experience search
+    ↓
+Skill + Experience Brief
+    ↓
+bounded tool execution
+    ↓
+evidence / failure / recovery / outcome
+    ↓
+derived experience + canonical embedding
+    ↓
+CockroachDB persistence
+    ↓
+related future task retrieves experience
+    ↓
+explicit source/use provenance
 ```
 
-Each workflow can have different tools and environments while keeping the same Hark semantics: **remember what actually happened, scope it correctly, and make that experience available to the next related execution.**
+The related run must still gather fresh evidence. Retrieved memory guides execution; it is not a cached answer.
+
+### 6. Test both sides of memory
+
+For each workflow, verify at minimum:
+
+- a first run with no useful precedent,
+- experience persistence,
+- a related run that retrieves the right experience,
+- changed execution or recovery behavior when memory is useful,
+- unrelated tasks below the retrieval threshold,
+- workflow/environment isolation,
+- provenance,
+- invalidation.
+
+---
+
+## Example workflow directions
+
+### Kubernetes incident response
+
+```text
+Skill: deployment / pod triage
+Environment: production cluster
+Experience: known RBAC boundary, successful evidence path, recovery sequence
+```
+
+### CI/CD failure diagnosis
+
+```text
+Skill: pipeline investigation
+Environment: repository / pipeline
+Experience: flaky stage, cache failure, successful fallback, project-specific command
+```
+
+### Security investigation
+
+```text
+Skill: alert triage
+Environment: security platform
+Experience: noisy signal source, validated evidence path, safe escalation route
+```
+
+### Repository maintenance
+
+```text
+Skill: codebase diagnosis
+Environment: repository
+Experience: test command, generated-file boundary, known tooling failure, successful recovery
+```
+
+### Data / database operations
+
+```text
+Skill: performance or pipeline diagnosis
+Environment: database / warehouse / ETL system
+Experience: permissions, query/tool constraints, known safe fallback, evidence path
+```
+
+---
+
+## The extension rule
+
+Different workflows may use completely different Skills and tools, but the Hark contract stays recognizable:
+
+> **Remember what actually happened, scope it correctly, preserve its provenance, and make relevant experience available to the next execution.**
+
+That is the layer Hark adds around Agent Skills.
